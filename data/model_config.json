@@ -1,0 +1,26 @@
+{
+  "Giro": {
+    "model": "Prophet",
+    "config": {
+      "changepoint_prior_scale": 0.1,
+      "seasonality_prior_scale": 1.0,
+      "seasonality_mode": "multiplicative"
+    }
+  },
+  "Tabungan": {
+    "model": "Prophet",
+    "config": {
+      "changepoint_prior_scale": 0.1,
+      "seasonality_prior_scale": 0.01,
+      "seasonality_mode": "additive"
+    }
+  },
+  "Deposito": {
+    "model": "XGBoost",
+    "config": {
+      "n_estimators": 50,
+      "learning_rate": 0.02,
+      "max_depth": 5
+    }
+  }
+}

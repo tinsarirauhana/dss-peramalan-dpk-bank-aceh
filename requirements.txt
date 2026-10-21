@@ -1,0 +1,8 @@
+streamlit>=1.60.0
+pandas
+numpy
+plotly
+statsmodels
+prophet
+xgboost
+st-gsheets-connection

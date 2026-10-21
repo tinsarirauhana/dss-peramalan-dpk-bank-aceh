@@ -1,0 +1,4 @@
+Target,Model_terbaik
+Giro,Prophet
+Tabungan,Prophet
+Deposito,XGBoost

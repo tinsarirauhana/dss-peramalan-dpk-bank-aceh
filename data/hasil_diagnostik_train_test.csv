@@ -1,0 +1,10 @@
+Target,Model,MAPE_train,MAPE_test,Selisih_MAPE(test-train),Interpretasi
+Giro,ARIMA,15.96,22.43,6.47,Tidak terindikasi overfitting
+Giro,Prophet,13.71,16.50,2.79,Tidak terindikasi overfitting
+Giro,XGBoost,11.41,20.43,9.02,Tidak terindikasi overfitting
+Tabungan,ARIMA,6.41,4.63,-1.78,Tidak terindikasi overfitting
+Tabungan,Prophet,2.05,2.65,0.60,Tidak terindikasi overfitting
+Tabungan,XGBoost,7.31,15.18,7.88,Tidak terindikasi overfitting
+Deposito,ARIMA,9.83,17.97,8.14,Tidak terindikasi overfitting
+Deposito,Prophet,10.93,19.67,8.74,Tidak terindikasi overfitting
+Deposito,XGBoost,6.35,15.81,9.45,Tidak terindikasi overfitting
