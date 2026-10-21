@@ -6,3 +6,4 @@ statsmodels
 prophet
 xgboost
 st-gsheets-connection
+scikit-learn
