@@ -260,9 +260,8 @@ if diagnostik_df is not None:
     _render_tabel_diagnostik(diagnostik_df)
     st.caption(
         "Metrik train dan test dihitung dengan mekanisme berbeda per model "
-        "(lihat catatan metodologi pada notebook eksperimen); selisih besar "
-        "tidak selalu murni menandakan overfitting, khususnya untuk XGBoost "
-        "yang mengevaluasi test melalui recursive multi-step forecasting."
+        "selisih besar tidak selalu murni menandakan overfitting, khususnya "
+        "untuk XGBoost yang mengevaluasi test melalui recursive multi-step"
     )
 
 

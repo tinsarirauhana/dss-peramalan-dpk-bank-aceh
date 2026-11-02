@@ -296,7 +296,7 @@ for tab, target in zip([tab_giro, tab_tabungan, tab_deposito], ["Giro", "Tabunga
         st.plotly_chart(fig, use_container_width=True)
 
         # Membandingkan prediksi bulan keenam dengan aktual terakhir untuk ringkasan arah.
-        arah = "naik" if fc_target["Forecast"].iloc[-1] > df_historis[target].iloc[-1] else "turun"
+        arah = "naik" if fc_target["Forecast"].iloc[-1] > df_historis[target].iloc[-1] else "turun" # ["Forecast"].iloc[-1] → bulan terakhir dari enam bulan prediksi. [target].iloc[-1] → nilai aktual terakhir yang tersedia dalam data historis.
         st.markdown(
             f'<div class="alert-info">Model yang digunakan: <span class="badge-model">{model_dipakai}</span> '
             f"&nbsp; Tren perkiraan {arah} dibandingkan nilai historis terakhir.</div>",
