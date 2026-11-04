@@ -1,6 +1,10 @@
-"""Membaca, menambah, dan menghapus data historis operasional pada Google Sheets.
+"""Membaca, menambah, mengoreksi, dan menghapus data historis pada Google Sheets.
 Sheet1 memuat kolom Periode, Giro, Tabungan, dan Deposito dalam juta rupiah.
 Koneksi menggunakan bagian connections.gsheets pada Streamlit Secrets."""
+
+from datetime import datetime
+from math import isfinite
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import streamlit as st
@@ -35,6 +39,30 @@ def baca_data_historis() -> pd.DataFrame:
     return _baca_data_historis(ttl=60)
 
 
+def periode_maksimal_input(hari_ini=None) -> pd.Timestamp:
+    """Bulan terakhir yang SUDAH SELESAI menurut kalender WIB.
+
+    Ini bukan verifikasi tanggal publikasi laporan keuangan; sumber angkanya
+    tetap harus diperiksa admin sebelum memasukkan data.
+
+    ``hari_ini`` hanya untuk pengujian agar hasil tidak bergantung jam komputer.
+    """
+    tanggal = hari_ini if hari_ini is not None else datetime.now(ZoneInfo("Asia/Jakarta")).date()
+    bulan_berjalan = pd.Timestamp(tanggal).to_period("M").to_timestamp()
+    return bulan_berjalan - pd.DateOffset(months=1)
+
+
+def _pastikan_nominal_valid(giro: float, tabungan: float, deposito: float):
+    """Validasi backend: antarmuka bukan satu-satunya penjaga nilai input."""
+    for nama, nilai in {"Giro": giro, "Tabungan": tabungan, "Deposito": deposito}.items():
+        try:
+            angka = float(nilai)
+        except (TypeError, ValueError):
+            raise ValueError(f"{nama} harus berupa angka positif.") from None
+        if not isfinite(angka) or angka <= 0:
+            raise ValueError(f"{nama} harus lebih besar dari nol dan bernilai hingga.")
+
+
 def tambah_data_baru(periode: pd.Timestamp, giro: float, tabungan: float, deposito: float):
     """Memeriksa periode terbaru, menyimpan satu bulan tambahan, dan membersihkan cache."""
     conn = get_connection()
@@ -45,6 +73,8 @@ def tambah_data_baru(periode: pd.Timestamp, giro: float, tabungan: float, deposi
     valid, pesan = validasi_periode_baru(periode, df_lama)
     if not valid:
         raise ValueError(pesan)
+
+    _pastikan_nominal_valid(giro, tabungan, deposito)
 
     # Menyusun satu baris yang memuat periode dan ketiga nilai DPK.
     baris_baru = pd.DataFrame([{
@@ -75,12 +105,52 @@ def validasi_periode_baru(periode_baru: pd.Timestamp, df_historis: pd.DataFrame)
     # Menetapkan satu-satunya periode baru yang diterima: bulan setelah data terakhir.
     periode_seharusnya = (pd.Timestamp(periode_terakhir) + pd.DateOffset(months=1)).replace(day=1)
 
-    if pd.Timestamp(periode_baru).replace(day=1) != periode_seharusnya:
+    if pd.Timestamp(periode_baru).to_period("M").to_timestamp() != periode_seharusnya:
         return False, (
             f"Periode berikutnya yang valid adalah {periode_seharusnya:%Y-%m}. "
             "Data harus ditambahkan berurutan tanpa lompat bulan."
         )
+    # Menolak bulan berjalan (belum selesai) atau bulan masa depan.
+    # Pemeriksaan ini DIULANG di backend pada saat menyimpan.
+    if periode_seharusnya > periode_maksimal_input():
+        return False, (
+            f"Periode {periode_seharusnya:%Y-%m} belum selesai menurut kalender WIB. "
+            f"Bulan terakhir yang dapat diinput adalah {periode_maksimal_input():%Y-%m}, "
+            "jika laporan resminya sudah tersedia dan diverifikasi."
+        )
     return True, ""
+
+
+def ubah_data_historis(periode: pd.Timestamp, giro: float, tabungan: float, deposito: float,
+                        nilai_awal: dict | None = None):
+    """Koreksi nominal periode yang sudah ada tanpa mengubah indeks waktunya.
+
+    Membaca Sheet1 secara fresh. ``nilai_awal`` opsional dipakai untuk mencegah
+    penimpaan sunyi bila ada admin lain memperbarui bulan yang sama setelah
+    formulir koreksi ditampilkan.
+    """
+    _pastikan_nominal_valid(giro, tabungan, deposito)
+    periode = pd.Timestamp(periode).to_period("M").to_timestamp()
+    conn = get_connection()
+    df = _baca_data_historis(ttl=0)
+    cocok = df["Periode"] == periode
+    if int(cocok.sum()) != 1:
+        raise ValueError("Periode yang akan diedit tidak ditemukan secara unik di histori.")
+
+    if nilai_awal is not None:
+        baris_asli = df.loc[cocok].iloc[0]
+        for kolom in ("Giro", "Tabungan", "Deposito"):
+            if float(baris_asli[kolom]) != float(nilai_awal[kolom]):
+                raise ValueError(
+                    "Data periode ini sudah diubah di Google Sheets sejak formulir dibuka. "
+                    "Muat ulang halaman sebelum mengoreksi."
+                )
+
+    df.loc[cocok, ["Giro", "Tabungan", "Deposito"]] = [giro, tabungan, deposito]
+    df["Periode"] = df["Periode"].dt.strftime("%Y-%m-%d")
+    conn.update(worksheet="Sheet1", data=df)
+    st.cache_data.clear()
+    return periode
 
 
 def hapus_data_terakhir():

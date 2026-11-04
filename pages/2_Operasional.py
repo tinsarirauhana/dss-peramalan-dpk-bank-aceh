@@ -9,7 +9,10 @@ import streamlit as st
 from utils.styling import inject_global_css, page_header, section_heading, metric_card, format_rupiah, format_bulan, PALET
 from utils.auth import require_login
 from utils.model_utils import load_model_config, refit_semua_komponen
-from utils.sheets import baca_data_historis, tambah_data_baru, validasi_periode_baru, hapus_data_terakhir
+from utils.sheets import (
+    baca_data_historis, tambah_data_baru, validasi_periode_baru,
+    hapus_data_terakhir, periode_maksimal_input, ubah_data_historis,
+)
 
 inject_global_css()
 require_login()
@@ -33,6 +36,8 @@ except Exception as exc:
     st.stop()
 
 periode_terakhir = df_historis["Periode"].max()
+periode_maksimal = periode_maksimal_input()
+ada_periode_masa_depan = bool((df_historis["Periode"] > periode_maksimal).any())
 
 
 section_heading("Data historis terbaru")
@@ -58,6 +63,14 @@ for label, value, sub, accent in kartu_data:
     )
 grid_html += '</div>'
 st.markdown(grid_html, unsafe_allow_html=True)
+
+if ada_periode_masa_depan:
+    st.error(
+        f"Histori memuat bulan yang belum selesai menurut kalender WIB "
+        f"(batas: {format_bulan(periode_maksimal)}). "
+        "Hapus periode terakhir yang belum valid secara berurutan. "
+        "Peramalan dinonaktifkan hingga data diperbaiki."
+    )
 
 with st.expander("Lihat seluruh data historis"):
     st.dataframe(
@@ -123,6 +136,87 @@ with st.expander("Lihat seluruh data historis"):
                 del st.session_state["konfirmasi_hapus"]
                 st.rerun()
 
+    # Fitur koreksi disimpan dalam panel histori agar tampilan utama tetap sama.
+    if st.button("Edit nominal data historis", key="btn_edit_toggle"):
+        st.session_state["tampilkan_edit_historis"] = not st.session_state.get("tampilkan_edit_historis", False)
+    if st.session_state.get("tampilkan_edit_historis", False):
+        pilihan_periode = sorted(df_historis["Periode"].unique(), reverse=True)
+        periode_edit = st.selectbox(
+            "Pilih periode yang akan dikoreksi",
+            options=pilihan_periode,
+            format_func=format_bulan,
+            key="pilihan_periode_edit",
+        )
+        baris_edit = df_historis[df_historis["Periode"] == periode_edit].iloc[0]
+        st.caption(
+            "Ubah hanya nominal Giro, Tabungan, atau Deposito berdasarkan laporan yang sudah "
+            "diverifikasi. Periode tetap, dan bulan sesudahnya tidak dihapus."
+        )
+        with st.form("form_edit_historis"):
+            col_g, col_t, col_d = st.columns(3)
+            periode_key = pd.Timestamp(periode_edit).strftime("%Y%m")
+            revisi_edit = st.session_state.get("edit_revision", 0)
+            with col_g:
+                giro_edit = st.number_input(
+                    "Giro (juta Rp)", min_value=0.0, value=float(baris_edit["Giro"]),
+                    step=1000.0, format="%.0f", key=f"edit_g_{periode_key}_{revisi_edit}",
+                )
+            with col_t:
+                tabungan_edit = st.number_input(
+                    "Tabungan (juta Rp)", min_value=0.0, value=float(baris_edit["Tabungan"]),
+                    step=1000.0, format="%.0f", key=f"edit_t_{periode_key}_{revisi_edit}",
+                )
+            with col_d:
+                deposito_edit = st.number_input(
+                    "Deposito (juta Rp)", min_value=0.0, value=float(baris_edit["Deposito"]),
+                    step=1000.0, format="%.0f", key=f"edit_d_{periode_key}_{revisi_edit}",
+                )
+            cek_edit = st.form_submit_button("Periksa koreksi", use_container_width=True)
+
+        if cek_edit:
+            if min(giro_edit, tabungan_edit, deposito_edit) <= 0:
+                st.warning("Nominal Giro, Tabungan, dan Deposito harus lebih besar dari nol.")
+            else:
+                st.session_state["edit_menunggu_konfirmasi"] = {
+                    "periode": pd.Timestamp(periode_edit),
+                    "giro": giro_edit, "tabungan": tabungan_edit, "deposito": deposito_edit,
+                    "nilai_awal": {k: float(baris_edit[k]) for k in ("Giro", "Tabungan", "Deposito")},
+                }
+
+        pending_edit = st.session_state.get("edit_menunggu_konfirmasi")
+        if pending_edit is not None and pending_edit["periode"] != pd.Timestamp(periode_edit):
+            del st.session_state["edit_menunggu_konfirmasi"]
+            pending_edit = None
+        if pending_edit is not None:
+            st.markdown(f"**Konfirmasi koreksi {format_bulan(pending_edit['periode'])}:**")
+            st.dataframe(pd.DataFrame([
+                {"Status": "Sebelum", **pending_edit["nilai_awal"]},
+                {"Status": "Sesudah", "Giro": pending_edit["giro"],
+                 "Tabungan": pending_edit["tabungan"], "Deposito": pending_edit["deposito"]},
+            ]), hide_index=True, use_container_width=True)
+            ya, batal = st.columns(2)
+            with ya:
+                if st.button("Ya, simpan koreksi", type="primary", use_container_width=True):
+                    try:
+                        with st.spinner("Memperbarui nominal data historis..."):
+                            ubah_data_historis(
+                                pending_edit["periode"], pending_edit["giro"],
+                                pending_edit["tabungan"], pending_edit["deposito"],
+                                nilai_awal=pending_edit["nilai_awal"],
+                            )
+                        del st.session_state["edit_menunggu_konfirmasi"]
+                        # Ganti key input setelah rerun, sehingga nilai default mengikuti Sheets.
+                        st.session_state["edit_revision"] = st.session_state.get("edit_revision", 0) + 1
+                        st.success("Koreksi tersimpan. Model akan di-refit menggunakan histori terbaru.")
+                        st.rerun()
+                    except ValueError as exc:
+                        st.warning(str(exc))
+                        del st.session_state["edit_menunggu_konfirmasi"]
+            with batal:
+                if st.button("Batalkan koreksi", use_container_width=True):
+                    del st.session_state["edit_menunggu_konfirmasi"]
+                    st.rerun()
+
 st.markdown('<hr class="emas-divider">', unsafe_allow_html=True)
 
 
@@ -130,6 +224,13 @@ section_heading("Tambah data bulanan baru")
 
 # Menetapkan bulan input secara otomatis agar penambahan data tetap berurutan.
 periode_seharusnya = (pd.Timestamp(periode_terakhir) + pd.DateOffset(months=1)).replace(day=1)
+periode_boleh_diisi = periode_seharusnya <= periode_maksimal
+if not periode_boleh_diisi:
+    st.warning(
+        f"Bulan {format_bulan(periode_seharusnya)} belum selesai menurut kalender WIB. "
+        f"Bulan paling baru yang boleh diinput: {format_bulan(periode_maksimal)} "
+        "(setelah laporan resmi tersedia dan diperiksa admin)."
+    )
 
 st.markdown(
     f'<div class="alert-info">Periode berikutnya yang valid: '
@@ -192,7 +293,10 @@ with st.form("form_data_baru"):
             "Tabungan_Wadiah": tabungan_wadiah, "Tabungan_NonPS": tabungan_nonps,
         }
 
-    submit_cek = st.form_submit_button("Periksa data", use_container_width=True, type="primary")
+    submit_cek = st.form_submit_button(
+        "Periksa data", use_container_width=True, type="primary",
+        disabled=not periode_boleh_diisi,
+    )
 
 # Memeriksa periode dan nilai total setelah formulir dikirim.
 if submit_cek:
@@ -257,6 +361,13 @@ if "data_menunggu_konfirmasi" in st.session_state:
 
 st.markdown('<hr class="emas-divider">', unsafe_allow_html=True)
 
+
+if ada_periode_masa_depan:
+    st.warning(
+        "Peramalan dihentikan sementara: terdapat data pada bulan yang belum "
+        "selesai. Gunakan 'Hapus data terakhir' untuk memperbaiki histori."
+    )
+    st.stop()
 
 section_heading(f"Peramalan 6 bulan setelah {format_bulan(periode_terakhir)}")
 
